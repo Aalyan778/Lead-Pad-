@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LeadPad</title>
+<style>
+:root{--bg:#f5f5f2;--card:#fff;--ink:#1c1c1a;--mut:#6b6b66;--acc:#1f6f5c;--line:#e2e2dc;--bad:#c0392b}
+@media (prefers-color-scheme:dark){:root{--bg:#171716;--card:#222220;--ink:#eee;--mut:#9a9a94;--acc:#4fb89e;--line:#38382f;--bad:#ff7b6b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}
+header{position:sticky;top:0;background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;z-index:5}
+header h1{font-size:18px;margin:0 8px 0 0}
+button{font:inherit;padding:7px 12px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;cursor:pointer}
+button.p{background:var(--acc);color:#fff;border-color:var(--acc)}
+button.on{border-color:var(--acc);color:var(--acc);font-weight:700}
+main{max-width:860px;margin:0 auto;padding:16px}
+#paste{width:100%;min-height:90px;padding:12px;border:2px dashed var(--acc);border-radius:10px;background:var(--card);color:var(--ink);font:inherit;resize:vertical}
+.hint{color:var(--mut);font-size:13px;margin:6px 0 10px}
+#msg{min-height:26px;font-weight:600;margin-bottom:8px}
+#msg.ok{color:var(--acc)}#msg.no{color:var(--bad)}
+.tabs{display:flex;gap:8px;margin-bottom:12px}
+.e{display:flex;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px}
+.n{min-width:42px;font-weight:700;color:var(--acc);padding-top:4px}
+.e textarea{flex:1;border:0;background:transparent;color:var(--ink);font:inherit;resize:none;outline:none;overflow:hidden}
+.dd{flex:1;white-space:pre-wrap;word-break:break-word}.rs{color:var(--bad);font-size:13px;font-weight:600;margin-bottom:4px}
+.x{border:0;color:var(--mut);padding:2px 8px;align-self:flex-start}
+#st{font-weight:700;color:var(--acc);font-size:15px}#rc{color:var(--mut);font-size:12px}
+.g{color:var(--mut);font-size:13px}.g input{width:64px;font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+#pop{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;overflow:hidden}
+#pop[hidden]{display:none}
+.box{background:var(--card);border-radius:20px;padding:36px 44px;text-align:center;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.4);animation:pp .6s cubic-bezier(.2,1.6,.4,1);position:relative;z-index:2}
+.box .big{font-size:72px;animation:bn 1s infinite}
+.box h2{margin:8px 0;font-size:34px;color:var(--acc)}
+.box p{margin:0 0 20px;color:var(--mut);font-size:18px}
+.cf{position:absolute;top:-20px;width:10px;height:16px;animation:fall linear forwards;z-index:1}
+@keyframes pp{from{transform:scale(.2);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes bn{50%{transform:translateY(-12px) rotate(8deg)}}
+@keyframes fall{to{transform:translateY(110vh) rotate(720deg)}}
+</style>
+</head>
+<body>
+<header>
+  <h1>LeadPad</h1>
+  <span id="st"></span>
+  <label class="g">Goal <input type="number" id="goal" min="1" value="400"></label>
+  <span id="rc"></span>
+  <span style="margin-left:auto"></span>
+  <input type="file" id="open" accept=".txt" hidden>
+  <input type="file" id="csv" accept=".csv,.txt" hidden>
+  <input type="file" id="imp" accept=".csv" hidden>
+  <button onclick="$('csv').click()">Check CSV file</button>
+  <button onclick="saveTxt()" class="p">Save .txt</button>
+  <button onclick="saveDoc()" class="p">Save Word</button>
+  <button onclick="exportRec()">Export record</button>
+  <button onclick="$('imp').click()">Import record</button>
+  <button onclick="$('open').click()">Open .txt</button>
+  <button onclick="clearAll()">New day</button>
+</header>
+<main>
+  <textarea id="paste" placeholder="Paste a lead here (Ctrl+V). It is checked against all old leads, then numbered automatically." autofocus></textarea>
+  <div class="hint">Duplicate = same phone, email, any link (website / Maps / Facebook / Instagram), or Business name + Address (lines like "Name: ..." and "Address: ..."). New leads get the next number; duplicates go to the Duplicates tab with the reason.</div>
+  <div id="msg"></div>
+  <div class="tabs"><button id="tn" onclick="setTab('new')"></button><button id="td" onclick="setTab('dup')"></button><button id="sd" onclick="saveDups()" style="margin-left:auto">Save duplicates .txt</button></div>
+  <div id="list"></div>
+</main>
+<div id="pop" hidden onclick="closePop()">
+  <div class="box" onclick="event.stopPropagation()">
+    <div class="big">🎉</div>
+    <h2 id="popt">400 LEADS DONE!</h2>
+    <p>Fantastic work! Today's target is complete! 🚀</p>
+    <button class="p" onclick="closePop()">Awesome!</button>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id),list=$('list'),paste=$('paste'),st=$('st');
+let items=[],dups=[],tab='new',hit=false,goal=400,db,rec=new Map();
+try{items=JSON.parse(localStorage.getItem('leadpad')||'[]');dups=JSON.parse(localStorage.getItem('leadpad_dups')||'[]')}catch(e){}
+try{goal=parseInt(localStorage.getItem('leadpad_goal'))||400}catch(e){}
+
+/* permanent record (IndexedDB) */
+const ready=new Promise(res=>{
+  try{
+    const r=indexedDB.open('leadpad',1);
+    r.onupgradeneeded=()=>r.result.createObjectStore('k');
+    r.onsuccess=()=>{db=r.result;const c=db.transaction('k').objectStore('k').openCursor();
+      c.onsuccess=e=>{const u=e.target.result;if(u){rec.set(u.key,u.value);u.continue()}else{res();persist()}}};
+    r.onerror=()=>res();
+  }catch(e){res()}
+});
+function saveKeys(p){if(!db)return;const s=db.transaction('k','readwrite').objectStore('k');p.forEach(([k,v])=>s.put(v,k))}
+
+/* duplicate detection */
+const EM=/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+const LRE=/(?:https?:\/\/|www\.)[^\s,;"'<>]+|(?<![@\w.\/-])(?:[a-z0-9-]+\.)+(?:com|net|org|co|io|pk|uk|us|biz|info|shop|store|app|me|ly|gl)(?:\/[^\s,;"'<>]*)?(?![\w@])/gi;
+const nz=s=>s.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+const nu=u=>u.toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/[?&](utm_\w+|fbclid|igshid|si)=[^&]*/g,'').replace(/#.*$/,'').replace(/[?&]+$/,'').replace(/[\/.,)\]]+$/,'');
+const fld=(t,k)=>{const m=t.match(new RegExp('^\\s*(?:'+k+')\\s*[:=\\-]\\s*(.+)$','im'));return m?m[1].trim():''};
+function keysOf(t){
+  const K=new Set();
+  (t.match(EM)||[]).forEach(e=>K.add('email:'+e.toLowerCase()));
+  (t.match(LRE)||[]).forEach(u=>{const n=nu(u);if(n.includes('.'))K.add('link:'+n)});
+  const rest=t.replace(EM,' ').replace(LRE,' ');
+  (rest.match(/\+?\d[\d\s().-]{7,}\d/g)||[]).forEach(p=>{const d=p.replace(/\D/g,'');if(d.length>=10&&d.length<=15)K.add('phone:'+d.slice(-10))});
+  const L=t.split(/\n|\t|·|\|/).map(x=>x.trim()).filter(Boolean);
+  const skip=l=>/^[\d\s+().,-]*$/.test(l)||/@|https?:|www\./i.test(l);
+  const isA=l=>!skip(l)&&l.length>=10&&(/\b(street|st|road|rd|ave|avenue|blvd|boulevard|suite|ste|floor|plaza|lane|ln|drive|dr|highway|hwy|block|sector|phase|market|colony|town|chowk|near|opposite)\b/i.test(l)||(/\d/.test(l)&&/,/.test(l)));
+  const n=fld(t,'business\\s*name|business|company\\s*name|company|title|name')||(L.find(l=>!skip(l))||'').replace(/^[^:]{1,15}:\s*/,'');
+  const a=fld(t,'full\\s*address|street\\s*address|address')||(L.slice(1).find(isA)||'').replace(/^[^:]{1,15}:\s*/,'');
+  if(n&&a)K.add('name+address:'+nz(n)+'|'+nz(a));
+  return [...K];
+}
+const LBL={phone:'Phone',email:'Email',link:'Link','name+address':'Business name + address'};
+function check(text){
+  const keys=keysOf(text),snip=text.split('\n')[0].slice(0,50);
+  for(const k of keys)if(rec.has(k)){
+    const i=k.indexOf(':'),ty=k.slice(0,i),v=k.slice(i+1).slice(0,60);
+    const reason=LBL[ty]+' match ('+v+') — already recorded as "'+rec.get(k)+'"';
+    dups.push({t:text,r:reason});return{dup:1,reason};
+  }
+  items.push(text);keys.forEach(k=>rec.set(k,snip));saveKeys(keys.map(k=>[k,snip]));
+  if(items.length===goal)hit=true;
+  return{dup:0,n:items.length,nokeys:!keys.length};
+}
+function msg(t,ok){const m=$('msg');m.textContent=t;m.className=ok?'ok':'no'}
+function finish(){render();window.scrollTo({top:0,behavior:'smooth'});paste.focus({preventScroll:true});if(hit){hit=false;celebrate()}}
+async function add(text){
+  text=text.trim();if(!text)return;await ready;
+  const r=check(text);finish();
+  msg(r.dup?'❌ Duplicate — '+r.reason:'✅ New lead #'+r.n+(r.nokeys?' (⚠ no phone/email/link found, could not be checked)':''),!r.dup);
+}
+
+/* UI */
+function persist(){
+  try{localStorage.setItem('leadpad',JSON.stringify(items));localStorage.setItem('leadpad_dups',JSON.stringify(dups))}catch(e){}
+  st.textContent=items.length+' / '+goal+' leads';$('rc').textContent='Record: '+rec.size+' keys';
+}
+function grow(t){t.style.height='auto';t.style.height=t.scrollHeight+'px'}
+function setTab(t){tab=t;render()}
+function render(){
+  list.innerHTML='';
+  $('tn').textContent='New (np) · '+items.length;$('td').textContent='Duplicates · '+dups.length;
+  $('tn').className=tab==='new'?'on':'';$('td').className=tab==='dup'?'on':'';$('sd').hidden=tab!=='dup';
+  const arr=tab==='new'?items:dups;
+  arr.forEach((v,i)=>{
+    const d=document.createElement('div');d.className='e';
+    const x=document.createElement('button');x.className='x';x.textContent='✕';x.title='Delete';
+    x.onclick=()=>{arr.splice(i,1);render()};
+    if(tab==='new'){
+      d.innerHTML='<div class="n">'+(i+1)+'.</div>';
+      const t=document.createElement('textarea');t.value=v;
+      t.oninput=()=>{items[i]=t.value;grow(t);persist()};
+      d.append(t,x);list.append(d);grow(t);
+    }else{
+      d.innerHTML='<div class="n" style="color:var(--bad)">D'+(i+1)+'</div><div class="dd"><div class="rs"></div><div class="tx"></div></div>';
+      d.querySelector('.rs').textContent=v.r;d.querySelector('.tx').textContent=v.t;
+      d.append(x);list.append(d);
+    }
+  });
+  persist();
+}
+paste.addEventListener('paste',e=>{e.preventDefault();add((e.clipboardData||window.clipboardData).getData('text'));paste.value=''});
+paste.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();add(paste.value);paste.value=''}});
+document.addEventListener('paste',e=>{if(e.target===paste||e.target.closest('.e'))return;e.preventDefault();add(e.clipboardData.getData('text'))});
+
+/* CSV + files */
+function parseCSV(t){
+  const rows=[];let r=[],c='',q=false;t=t.replace(/^\uFEFF/,'');
+  for(let i=0;i<t.length;i++){const ch=t[i];
+    if(q){if(ch=='"'){if(t[i+1]=='"'){c+='"';i++}else q=false}else c+=ch}
+    else if(ch=='"')q=true;
+    else if(ch==','){r.push(c);c=''}
+    else if(ch=='\n'||ch=='\r'){if(ch=='\r'&&t[i+1]=='\n')i++;r.push(c);c='';rows.push(r);r=[]}
+    else c+=ch}
+  if(c||r.length){r.push(c);rows.push(r)}
+  return rows.filter(r=>r.some(x=>x.trim()));
+}
+const q=s=>'"'+String(s).replace(/"/g,'""')+'"';
+$('csv').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const rows=parseCSV(await f.text());await ready;
+  const h=rows.shift()||[];let n=0,d=0;
+  rows.forEach(r=>{
+    const t=h.map((x,i)=>(r[i]||'').trim()?x.trim()+': '+r[i].trim():'').filter(Boolean).join('\n');
+    if(!t)return;check(t).dup?d++:n++;
+  });
+  finish();msg('File checked: '+n+' new, '+d+' duplicates',1);e.target.value='';
+};
+function exportRec(){dl('all_leads.csv','text/csv;charset=utf-8','key,lead\n'+[...rec].map(([k,v])=>q(k)+','+q(v)).join('\n'))}
+$('imp').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;await ready;
+  const rows=parseCSV(await f.text()).filter(r=>r[0]&&r[0]!=='key'&&r[0].includes(':'));
+  rows.forEach(r=>rec.set(r[0],r[1]||''));saveKeys(rows.map(r=>[r[0],r[1]||'']));
+  persist();msg('Record imported: '+rows.length+' keys',1);e.target.value='';
+};
+function out(){return items.map((t,i)=>(i+1)+'. '+t).join('\n\n\n')+'\n'}
+function stamp(){const d=new Date(),p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())}
+function dl(name,type,data){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type}));a.download=name;document.body.append(a);a.click();a.remove()}
+function saveTxt(){dl('leads-np-'+stamp()+'.txt','text/plain;charset=utf-8',out())}
+function saveDups(){dl('leads-duplicate-'+stamp()+'.txt','text/plain;charset=utf-8',dups.map((d,i)=>(i+1)+'. '+d.t+'\n   Reason: '+d.r).join('\n\n\n')+'\n')}
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function saveDoc(){
+  const body=items.map((t,i)=>'<p>'+(i+1)+'. '+esc(t).replace(/\n/g,'<br>')+'</p><p>&nbsp;</p><p>&nbsp;</p>').join('');
+  dl('leads-np-'+stamp()+'.doc','application/msword','<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><style>p{margin:0;font-family:Calibri,sans-serif;font-size:11pt}</style></head><body>'+body+'</body></html>');
+}
+$('open').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;const r=new FileReader();
+  r.onload=()=>{items=r.result.split(/\n\s*\n\s*\n/).map(s=>s.replace(/^\s*\d+\.\s*/,'').trim()).filter(Boolean);render()};
+  r.readAsText(f);e.target.value='';
+};
+function clearAll(){
+  if((items.length||dups.length)&&!confirm('Start a new day? Save your files first. The permanent record of old leads is kept.'))return;
+  items=[];dups=[];msg('',1);render();paste.focus();
+}
+
+/* goal + celebration */
+function celebrate(){
+  $('popt').textContent=goal+' LEADS DONE! 🎯';
+  const pop=$('pop');pop.hidden=false;pop.querySelectorAll('.cf').forEach(n=>n.remove());
+  const cols=['#e63946','#f4a261','#2a9d8f','#457b9d','#ffd166','#9b5de5'];
+  for(let i=0;i<80;i++){const c=document.createElement('i');c.className='cf';
+    c.style.left=Math.random()*100+'%';c.style.background=cols[i%6];
+    c.style.animationDuration=(2+Math.random()*2.5)+'s';c.style.animationDelay=(Math.random()*1.2)+'s';pop.append(c)}
+}
+function closePop(){$('pop').hidden=true;paste.focus()}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closePop()});
+$('goal').value=goal;
+$('goal').onchange=e=>{goal=Math.max(1,parseInt(e.target.value)||400);e.target.value=goal;try{localStorage.setItem('leadpad_goal',goal)}catch(x){}persist()};
+render();
+</script>
+</body>
+</html>
